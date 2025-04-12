@@ -24,6 +24,8 @@ pub fn sys_ioctl(_fd: i32, _op: usize, _argp: UserPtr<c_void>) -> LinuxResult<is
 
 pub fn sys_chdir(path: UserConstPtr<c_char>) -> LinuxResult<isize> {
     let path = path.get_as_str()?;
+    let path = resolve_path(path)?;
+    let path = path.as_str();
     axfs::api::set_current_dir(path).map(|_| 0).map_err(|err| {
         warn!("Failed to change directory: {err:?}");
         err.into()
@@ -32,7 +34,8 @@ pub fn sys_chdir(path: UserConstPtr<c_char>) -> LinuxResult<isize> {
 
 pub fn sys_mkdirat(dirfd: i32, path: UserConstPtr<c_char>, mode: u32) -> LinuxResult<isize> {
     let path = path.get_as_str()?;
-
+    let path = resolve_path(path)?;
+    let path = path.as_str();
     if !path.starts_with("/") && dirfd != AT_FDCWD as i32 {
         warn!("unsupported.");
         return Err(LinuxError::EINVAL);
@@ -79,6 +82,65 @@ pub fn sys_rmdir(path: UserConstPtr<c_char>) -> LinuxResult<isize> {
 pub fn sys_rename(
     old_path: UserConstPtr<c_char>,
     new_path: UserConstPtr<c_char>,
+) -> LinuxResult<isize> {
+    let old_path = old_path.get_as_str()?;
+    let old_path = resolve_path(old_path)?;
+    let old_path = old_path.as_str();
+    let new_path = new_path.get_as_str()?;
+    let new_path = resolve_path(new_path)?;
+    let new_path = new_path.as_str();
+    if old_path == new_path {
+        return Ok(0);
+    }
+    // Check if the old path is a directory
+    let old_metadata = axfs::api::metadata(old_path);
+    if old_metadata.is_err() {
+        warn!("Failed to get metadata for old path: {old_path:?}");
+        return Err(LinuxError::ENOENT);
+    }
+    let old_metadata = old_metadata.unwrap();
+    if old_metadata.is_dir() {
+        // If the old path is a directory, we need to check the new path
+        let new_metadata = axfs::api::metadata(new_path);
+        if new_metadata.is_ok() {
+            // If new_path exists, it must be a directory
+            if new_metadata.unwrap().is_dir() {
+                // Both are directories, proceed with rename
+                axfs::api::rename(old_path, new_path).map(|_| 0).map_err(|err| {
+                    warn!("Failed to rename directory: {err:?}");
+                    err.into()
+                })
+            } else {
+                warn!("New path exists but is not a directory: {new_path:?}");
+                Err(LinuxError::ENOTDIR)
+            }
+        } else {
+            axfs::api::remove_dir(old_path)?;
+            axfs::api::create_dir(new_path).map(|_| 0).map_err(|err| {
+                warn!("Failed to rename directory: {err:?}");
+                err.into()
+            })
+            // axfs::api::rename(old_path, new_path).map(|_| 0).map_err(|err| {
+            //     warn!("Failed to rename directory: {err:?}");
+            //     err.into()
+            // })
+        }
+    } else {
+        // If the old path is not a directory, proceed with rename
+        axfs::api::rename(old_path, new_path).map(|_| 0).map_err(|err| {
+            warn!("Failed to rename file: {err:?}");
+            err.into()
+        })
+    }
+}
+
+
+pub fn sys_renameat2(
+    old_dirfd: i32,
+    old_path: UserConstPtr<c_char>,
+    new_dirfd: i32,
+    new_path: UserConstPtr<c_char>,
+    flags: u32,
 ) -> LinuxResult<isize> {
     let old_path = old_path.get_as_str()?;
     let old_path = resolve_path(old_path)?;
