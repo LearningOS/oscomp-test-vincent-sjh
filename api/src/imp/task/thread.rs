@@ -1,6 +1,9 @@
+use alloc::string::{String, ToString};
 use core::{ffi::c_char, ptr};
 
 use alloc::vec::Vec;
+use arceos_posix_api::{FD_TABLE, close_all_file_like};
+use arceos_posix_api::ctypes::RLIMIT_NOFILE;
 use axerrno::{LinuxError, LinuxResult};
 use axtask::{TaskExtRef, current, yield_now};
 use macro_rules_attribute::apply;
@@ -9,7 +12,7 @@ use starry_core::{
     ctypes::{WaitFlags, WaitStatus},
     task::{exec, wait_pid},
 };
-
+use starry_core::task::Rlimit;
 use crate::{
     ptr::{PtrWrapper, UserConstPtr, UserPtr},
     syscall_instrument,
@@ -63,12 +66,14 @@ pub fn sys_exit(status: i32) -> ! {
         }
         // TODO: wake up threads, which are blocked by futex, and waiting for the address pointed by clear_child_tid
     }
+    // close any open file descriptors belonging to the process
+    close_all_file_like();
     axtask::exit(status);
 }
 
 pub fn sys_exit_group(status: i32) -> ! {
     warn!("Temporarily replace sys_exit_group with sys_exit");
-    axtask::exit(status);
+    sys_exit(status);
 }
 
 /// To set the clear_child_tid field in the task extended data.
@@ -159,11 +164,33 @@ pub fn sys_fork() -> LinuxResult<isize> {
 #[apply(syscall_instrument)]
 pub fn sys_prlimit64(
     _pid: i32,
-    _resource: i32,
-    _new_limit: UserConstPtr<usize>,
-    _old_limit: UserPtr<usize>,
+    resource: u32,
+    new_limit: UserConstPtr<Rlimit>,
+    old_limit: UserPtr<Rlimit>,
 ) -> LinuxResult<isize> {
-    warn!("[sys_prlimit64] Not implemented yet");
+
+    let curr = current();
+    let task = curr.task_ext();
+
+    match resource {
+        RLIMIT_NOFILE => {
+            let old_num: Rlimit = task.get_rlimit_nofile();
+            let new_limit = new_limit.nullable(UserConstPtr::get)?;
+            if let Some(new_limit) = new_limit {
+                unsafe { task.set_rlimit_nofile(*new_limit); }
+            }
+
+            let old_limit = old_limit.nullable(UserPtr::get)?;
+            if let Some(old_limit) = old_limit {
+                unsafe {
+                    *old_limit = old_num;
+                }
+            }
+        },
+        _ => {
+
+        }
+    }
     Ok(0)
 }
 
@@ -228,9 +255,27 @@ pub fn sys_execve(
         path_str, args, envs
     );
 
-    if let Err(e) = exec(path_str, &args, &envs) {
-        error!("Failed to exec: {:?}", e);
-        return Err::<isize, _>(LinuxError::ENOSYS);
+    // TODO: an ugly workaround for shebang
+    if path_str.ends_with(".sh") {
+        const BUSYBOX: &str = "/musl/busybox";
+        info!("[execve] shebang detected, calling sh...");
+        let mut new_args: Vec<String> = Vec::with_capacity(args.len() + 1);
+        new_args.push(BUSYBOX.into());
+        new_args.push("sh".into());
+        new_args.extend(args);
+        info!(
+            "execve: path: {:?}, args: {:?}, envs: {:?}",
+            BUSYBOX, new_args, envs
+        );
+        if let Err(e) = exec(BUSYBOX, &new_args, &envs) {
+            error!("Failed to exec: {:?}", e);
+            return Err::<isize, _>(LinuxError::ENOSYS);
+        }
+    } else {
+        if let Err(e) = exec(path_str, &args, &envs) {
+            error!("Failed to exec: {:?}", e);
+            return Err::<isize, _>(LinuxError::ENOSYS);
+        }
     }
 
     unreachable!("execve should never return");

@@ -9,6 +9,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use core::cell::Cell;
 use arceos_posix_api::FD_TABLE;
 use axerrno::{AxError, AxResult};
 use axfs::{CURRENT_DIR, CURRENT_DIR_PATH};
@@ -27,6 +28,79 @@ use crate::{
     ctypes::{CloneFlags, TimeStat, WaitStatus},
     mm::copy_from_kernel,
 };
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Rlimit{
+    pub rlim_cur: u32 ,
+    pub rlim_max: u32,
+}
+
+impl Default for Rlimit {
+    fn default() -> Self {
+        Rlimit {
+            rlim_cur: 65535, // 自定义初始值
+            rlim_max: 65535, // 自定义初始值
+        }
+    }
+}
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct SigSet {
+    pub bits: [usize; 2],
+}
+impl SigSet {
+    pub fn add(&mut self, signal: u32) -> bool {
+        if !(1..32).contains(&signal) {
+            return false;
+        }
+        let bit = 1 << (signal - 1);
+        if self.bits[0] & bit != 0 {
+            return false;
+        }
+        self.bits[0] |= bit;
+        true
+    }
+    pub fn remove(&mut self, signal: u32) -> bool {
+        if !(1..32).contains(&signal) {
+            return false;
+        }
+        let bit = 1 << (signal - 1);
+        if self.bits[0] & bit == 0 {
+            return false;
+        }
+        self.bits[0] &= !bit;
+        true
+    }
+
+    pub fn has(&self, signal: u32) -> bool {
+        (1..32).contains(&signal) && (self.bits[0] & (1 << (signal - 1))) != 0
+    }
+
+    pub fn add_from(&mut self, other: *const SigSet) {
+        unsafe{
+            self.bits[0] |= (*other).bits[0];
+            self.bits[1] |= (*other).bits[1];
+        }
+    }
+    pub fn remove_from(&mut self, other: *const SigSet) {
+        unsafe{
+            self.bits[0] &= !(*other).bits[0];
+            self.bits[1] &= !(*other).bits[1];
+        }
+    }
+
+    /// Dequeue the a signal in `mask` from this set, if any.
+    pub fn dequeue(&mut self, mask: &SigSet) -> Option<u32> {
+        let bits = self.bits[0] & mask.bits[0];
+        if bits == 0 {
+            None
+        } else {
+            let signal = bits.trailing_zeros();
+            self.bits[0] &= !(1 << signal);
+            Some(signal + 1)
+        }
+    }
+}
 
 /// Task extended data for the monolithic kernel.
 pub struct TaskExt {
@@ -54,6 +128,24 @@ pub struct TaskExt {
     pub heap_bottom: AtomicU64,
     /// The user heap top
     pub heap_top: AtomicU64,
+    // The resource limit
+    // RLIMIT_AS：进程的最大虚拟内存大小（字节）。
+    pub rlimit_as: Cell<Rlimit>,
+    // RLIMIT_CORE：核心转储文件（core dump）的最大大小。
+    pub rlimit_asc: Cell<Rlimit>,
+    // RLIMIT_CPU：CPU 时间限制（秒）。
+    pub rlimit_cpu: Cell<Rlimit>,
+    // RLIMIT_DATA：数据段的最大大小。
+    pub rlimit_data: Cell<Rlimit>,
+    // RLIMIT_FSIZE：创建文件的最大大小。
+    pub rlimit_fsize: Cell<Rlimit>,
+    // RLIMIT_NOFILE：打开文件描述符的最大数量。
+    pub rlimit_nofile: Cell<Rlimit>,
+    // RLIMIT_STACK：栈的最大大小。
+    pub rlimit_stack: Cell<Rlimit>,
+    // signal mask
+    pub signal_mask: Cell<SigSet>,
+    
 }
 
 impl TaskExt {
@@ -74,6 +166,16 @@ impl TaskExt {
             time: TimeStat::new().into(),
             heap_bottom: AtomicU64::new(heap_bottom),
             heap_top: AtomicU64::new(heap_bottom),
+            rlimit_as: Cell::new(Rlimit::default()),
+            rlimit_asc: Cell::new(Rlimit::default()),
+            rlimit_cpu: Cell::new(Rlimit::default()),
+            rlimit_data: Cell::new(Rlimit::default()),
+            rlimit_fsize: Cell::new(Rlimit::default()),
+            rlimit_stack: Cell::new(Rlimit::default()),
+            rlimit_nofile: Cell::new(Rlimit::default()),
+            signal_mask: Cell::new(SigSet {
+                bits: [0, 0],
+            }),
         }
     }
 
@@ -159,7 +261,61 @@ impl TaskExt {
     pub fn set_parent(&self, parent_id: u64) {
         self.parent_id.store(parent_id, Ordering::Release);
     }
+    pub fn set_rlimit_nofile(&self, new_value:  Rlimit) {
+        self.rlimit_nofile.set(new_value);
+    }
+    pub fn get_rlimit_nofile(&self) -> Rlimit {
+        self.rlimit_nofile.get()
+    }
 
+    pub fn add_signal(&self, other: *const SigSet) {
+        let mut prev_signal_mask = self.signal_mask.get();
+        prev_signal_mask.add_from(other);
+        self.signal_mask.set(prev_signal_mask);
+    }
+    pub fn remove_signal(&self, other: *const SigSet) {
+        let mut prev_signal_mask = self.signal_mask.get();
+        prev_signal_mask.remove_from(other);
+        self.signal_mask.set(prev_signal_mask);
+    }
+    pub fn get_signal_mask(&self) -> SigSet {
+        self.signal_mask.get()
+    }
+    pub fn set_signal_mask(&self, mask: *const SigSet) {
+        unsafe {self.signal_mask.set(*mask);}
+    }
+
+    pub fn set_rlimit_stack(&self, new_value: Rlimit) {
+        self.rlimit_stack.set(new_value);
+    }
+    pub fn get_rlimit_stack(&self) -> Rlimit {
+        self.rlimit_stack.get()
+    }
+    pub fn set_rlimit_cpu(&self, new_value: Rlimit) {
+        self.rlimit_cpu.set(new_value);
+    }
+    pub fn get_rlimit_cpu(&self) -> Rlimit {
+        self.rlimit_cpu.get()
+    }
+    pub fn set_rlimit_data(&self, new_value: Rlimit) {
+        self.rlimit_data.set(new_value);
+    }
+    pub fn get_rlimit_data(&self) -> Rlimit {
+        self.rlimit_data.get()
+    }
+    pub fn set_rlimit_fsize(&self, new_value: Rlimit) {
+        self.rlimit_fsize.set(new_value);
+    }
+    pub fn get_rlimit_fsize(&self) -> Rlimit {
+        self.rlimit_fsize.get()
+    }
+    pub fn set_rlimit_as(&self, new_value: Rlimit) {
+        self.rlimit_as.set(new_value);
+    }
+    pub fn get_rlimit_as(&self) -> Rlimit {
+        self.rlimit_as.get()
+    }
+    
     fn ns_init_new(&self) {
         FD_TABLE
             .deref_from(&self.ns)

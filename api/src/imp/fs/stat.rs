@@ -1,8 +1,9 @@
-use core::ffi::c_char;
-
+use arceos_posix_api::AT_FDCWD;
 use axerrno::{LinuxError, LinuxResult};
+use core::ffi::c_char;
 use macro_rules_attribute::apply;
 
+use crate::status::{FileStatus, TimeSpec};
 use crate::{
     ptr::{PtrWrapper, UserConstPtr, UserPtr},
     syscall_instrument,
@@ -92,15 +93,9 @@ pub fn sys_fstat(fd: i32, kstatbuf: UserPtr<Kstat>) -> LinuxResult<isize> {
     Ok(0)
 }
 
-#[apply(syscall_instrument)]
-pub fn sys_fstatat(
-    dir_fd: isize,
-    path: UserConstPtr<c_char>,
-    kstatbuf: UserPtr<Kstat>,
-    _flags: i32,
-) -> LinuxResult<isize> {
-    let path = path.get_as_null_terminated()?;
-    let path = arceos_posix_api::handle_file_path(dir_fd, Some(path.as_ptr() as _), false)?;
+pub fn sys_stat(path: UserConstPtr<c_char>, kstatbuf: UserPtr<Kstat>) -> LinuxResult<isize> {
+    let path = path.get_as_str()?;
+    let path = arceos_posix_api::handle_file_path(AT_FDCWD, Some(path.as_ptr() as _), false)?;
 
     let kstatbuf = kstatbuf.get()?;
 
@@ -123,11 +118,53 @@ pub fn sys_fstatat(
     Ok(0)
 }
 
+#[apply(syscall_instrument)]
+pub fn sys_fstatat(
+    dir_fd: isize,
+    path: UserConstPtr<c_char>,
+    kstatbuf: UserPtr<Kstat>,
+    _flags: i32,
+) -> LinuxResult<isize> {
+    let path = path.get_as_null_terminated()?;
+    info!("[sys_fstatat] dir_fd: {}, path: {:?}", dir_fd, path);
+    let path = arceos_posix_api::handle_file_path(dir_fd, Some(path.as_ptr() as _), false)?;
+
+    let kstatbuf = kstatbuf.get()?;
+
+    let mut statbuf = arceos_posix_api::ctypes::stat::default();
+    let result = unsafe {
+        arceos_posix_api::sys_stat(
+            path.as_ptr() as _,
+            &mut statbuf as *mut arceos_posix_api::ctypes::stat,
+        )
+    };
+    if result < 0 {
+        return Ok(result as _);
+    }
+
+    unsafe {
+        let kstat = Kstat::from(statbuf);
+        debug!("[sys_fstatat] kstat: {:?}", kstat);
+        kstatbuf.write(kstat);
+    }
+
+    Ok(0)
+}
+
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct FsStatxTimestamp {
     pub tv_sec: i64,
     pub tv_nsec: u32,
+}
+
+impl From<TimeSpec> for FsStatxTimestamp {
+    fn from(ts: TimeSpec) -> Self {
+        Self {
+            tv_sec: ts.seconds as i64,
+            tv_nsec: ts.nanoseconds as u32,
+        }
+    }
 }
 
 /// statx - get file status (extended)
@@ -150,6 +187,8 @@ pub struct StatX {
     pub stx_gid: u32,
     /// File mode (permissions).
     pub stx_mode: u16,
+    /// padding
+    pub _pad0: u16,
     /// Inode number.
     pub stx_ino: u64,
     /// Total size, in bytes.
@@ -180,6 +219,29 @@ pub struct StatX {
     pub stx_dio_mem_align: u32,
     /// Offset alignment for direct I/O.
     pub stx_dio_offset_align: u32,
+    /// Reserved for future use.
+    pub _spare: [u32; 12],
+}
+
+impl From<FileStatus> for StatX {
+    fn from(fs: FileStatus) -> Self {
+        Self {
+            stx_blksize: fs.block_size as _,
+            stx_attributes: fs.mode as _,
+            stx_nlink: fs.n_link as _,
+            stx_uid: fs.uid,
+            stx_gid: fs.gid,
+            stx_mode: fs.mode as _,
+            stx_ino: fs.inode as _,
+            stx_size: fs.size as _,
+            stx_blocks: fs.n_blocks as _,
+            stx_attributes_mask: 0x7FF,
+            stx_atime: fs.access_time.into(),
+            stx_ctime: fs.change_time.into(),
+            stx_mtime: fs.modify_time.into(),
+            ..Default::default()
+        }
+    }
 }
 
 #[apply(syscall_instrument)]
@@ -302,27 +364,31 @@ pub struct FsId {
     pub val: [i32; 2],
 }
 
-pub enum FsType {
-    EXT4_SUPER_MAGIC = 0xEF53,
-}
 
-// TODO: [incomplete] Add more file system types
+// TODO: [dummy] return dummy values
 #[apply(syscall_instrument)]
 pub fn sys_statfs(path: UserConstPtr<c_char>, buf: UserPtr<StatFs>) -> LinuxResult<isize> {
     let path = path.get_as_str()?;
-    let path = arceos_posix_api::handle_file_path(-1, Some(path.as_ptr() as _), false)?;
-    let buf = buf.get()?;
+    let _path = arceos_posix_api::handle_file_path(-1, Some(path.as_ptr() as _), false)?;
 
-    let stat_fs = StatFs {
-        f_type: FsType::EXT4_SUPER_MAGIC as _,
-        f_bsize: 4096,
+    // dummy data
+    let stat_fs = StatFs  {
+        f_type: 0,
+        f_bsize: 1024,
+        f_blocks: 0x4000_0000 / 512,
+        f_bfree: 1,
+        f_bavail: 1,
+        f_files: 1,
+        f_ffree: 1,
         f_namelen: 255,
-        f_frsize: 4096,
-        ..Default::default()
+        f_frsize: 0x1000,
+        f_flags: 0,
+        f_spare: [0, 0, 0, 0, 0],
+            ..Default::default()
     };
 
     unsafe {
-        buf.write(stat_fs);
+        buf.get()?.write(stat_fs);
     }
     Ok(0)
 }
