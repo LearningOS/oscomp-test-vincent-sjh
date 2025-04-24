@@ -62,7 +62,12 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
             tf.arg3().into(),
             tf.arg4() as _,
         ),
-
+        Sysno::renameat => sys_renameat(
+            tf.arg0() as _,
+            tf.arg1().into(),
+            tf.arg2() as _,
+            tf.arg3().into(),
+        ),
         #[cfg(target_arch = "x86_64")]
         Sysno::mkdir => sys_mkdir(tf.arg0().into(), tf.arg1() as _),
         #[cfg(target_arch = "x86_64")]

@@ -134,6 +134,15 @@ pub fn sys_rename(
     }
 }
 
+pub fn sys_renameat(
+    old_dirfd: i32,
+    old_path: UserConstPtr<c_char>,
+    new_dirfd: i32,
+    new_path: UserConstPtr<c_char>,
+) -> LinuxResult<isize> {
+    sys_renameat2(old_dirfd, old_path, new_dirfd, new_path, 0)
+}
+
 
 pub fn sys_renameat2(
     old_dirfd: i32,
