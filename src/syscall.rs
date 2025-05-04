@@ -216,6 +216,7 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
         Sysno::sysinfo => stub_unimplemented(syscall_num),
         Sysno::set_robust_list => stub_bypass(syscall_num),
         Sysno::readlinkat => stub_bypass(syscall_num),
+        #[cfg(target_arch = "x86_64")]
         Sysno::readlink => stub_bypass(syscall_num),
         Sysno::getrandom => stub_bypass(syscall_num),
         Sysno::rseq => stub_bypass(syscall_num),
