@@ -255,11 +255,9 @@
 /glibc/runtest.exe -w entry-dynamic.exe wcsstr_false_negative
 /glibc/busybox echo "#### OS COMP TEST GROUP END libctest-musl ####"
 /glibc/busybox echo "#### OS COMP TEST GROUP END libctest-glibc ####"
-
 /glibc/busybox echo "#### OS COMP TEST GROUP START busybox-musl ####"
 /glibc/busybox sh /glibc/busybox_testcode.sh
 /glibc/busybox echo "#### OS COMP TEST GROUP END busybox-musl ####"
-
 /glibc/busybox echo "#### OS COMP TEST GROUP START lua-musl ####"
 /glibc/busybox sh /glibc/lua_testcode.sh
 /glibc/busybox echo "#### OS COMP TEST GROUP END lua-musl ####"
