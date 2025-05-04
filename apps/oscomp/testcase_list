@@ -1,5 +1,5 @@
-/musl/busybox echo "#### OS COMP TEST GROUP START basic-glibc ####"
-/musl/busybox echo "#### OS COMP TEST GROUP START basic-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP START basic-glibc ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP START basic-musl ####"
 /glibc/basic/brk
 /glibc/basic/chdir
 /glibc/basic/close
@@ -32,11 +32,10 @@
 /glibc/basic/waitpid
 /glibc/basic/write
 /glibc/basic/yield
-/musl/busybox echo "#### OS COMP TEST GROUP END basic-musl ####"
-/musl/busybox echo "#### OS COMP TEST GROUP END basic-glibc ####"
-
-/musl/busybox echo "#### OS COMP TEST GROUP START libctest-glibc ####"
-/musl/busybox echo "#### OS COMP TEST GROUP START libctest-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP END basic-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP END basic-glibc ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP START libctest-glibc ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP START libctest-musl ####"
 /glibc/runtest.exe -w entry-static.exe argv
 /glibc/runtest.exe -w entry-static.exe basename
 /glibc/runtest.exe -w entry-static.exe clocale_mbfuncs
@@ -254,13 +253,13 @@
 /glibc/runtest.exe -w entry-dynamic.exe uselocale_0
 /glibc/runtest.exe -w entry-dynamic.exe wcsncpy_read_overflow
 /glibc/runtest.exe -w entry-dynamic.exe wcsstr_false_negative
-/musl/busybox echo "#### OS COMP TEST GROUP END libctest-musl ####"
-/musl/busybox echo "#### OS COMP TEST GROUP END libctest-glibc ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP END libctest-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP END libctest-glibc ####"
 
-/musl/busybox echo "#### OS COMP TEST GROUP START busybox-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP START busybox-musl ####"
 /glibc/busybox sh /glibc/busybox_testcode.sh
-/musl/busybox echo "#### OS COMP TEST GROUP END busybox-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP END busybox-musl ####"
 
-/musl/busybox echo "#### OS COMP TEST GROUP START lua-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP START lua-musl ####"
 /glibc/busybox sh /glibc/lua_testcode.sh
-/musl/busybox echo "#### OS COMP TEST GROUP END lua-musl ####"
+/glibc/busybox echo "#### OS COMP TEST GROUP END lua-musl ####"
