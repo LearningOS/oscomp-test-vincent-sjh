@@ -214,6 +214,9 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
         Sysno::faccessat => stub_bypass(syscall_num),
         Sysno::kill => stub_bypass(syscall_num),
         Sysno::sysinfo => stub_unimplemented(syscall_num),
+        Sysno::set_robust_list => stub_bypass(syscall_num),
+        Sysno::readlinkat => stub_bypass(syscall_num),
+        Sysno::getrandom => stub_bypass(syscall_num),
         _ => stub_kill(syscall_num),
     };
     let ans = result.unwrap_or_else(|err| -err.code() as _);
