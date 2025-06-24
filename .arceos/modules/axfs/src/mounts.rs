@@ -35,7 +35,10 @@ pub(crate) fn procfs() -> VfsResult<Arc<fs::ramfs::RamFileSystem>> {
 
     // Create /proc/sys/net/core/somaxconn
     proc_root.create("sys", VfsNodeType::Dir)?;
+    proc_root.create("sysvipc", VfsNodeType::Dir)?;
+    proc_root.create("1", VfsNodeType::Dir)?;
     proc_root.create("sys/net", VfsNodeType::Dir)?;
+    proc_root.create("sys/kernel", VfsNodeType::Dir)?;
     proc_root.create("sys/net/core", VfsNodeType::Dir)?;
     proc_root.create("sys/net/core/somaxconn", VfsNodeType::File)?;
     let file_somaxconn = proc_root.clone().lookup("./sys/net/core/somaxconn")?;

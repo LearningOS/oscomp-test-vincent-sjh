@@ -1,5 +1,5 @@
 use crate::imp::utils::path::resolve_path_with_parent;
-use crate::ptr::UserInPtr;
+use crate::ptr::{UserInPtr, UserOutPtr};
 use crate::{
     ptr::{PtrWrapper, UserConstPtr, UserPtr},
     syscall_instrument,
@@ -183,8 +183,21 @@ pub fn sys_linkat(
         .map_err(|err| err.into())
 }
 
-pub fn sys_getcwd(buf: UserPtr<c_char>, size: usize) -> LinuxResult<isize> {
-    Ok(arceos_posix_api::sys_getcwd(buf.get_as_null_terminated()?.as_ptr() as _, size) as _)
+#[syscall_trace]
+pub fn sys_getcwd(buf: UserOutPtr<u8>, size: usize) -> LinuxResult<isize> {
+    let cwd = axfs::api::current_dir()?;
+    let cwd = cwd.as_bytes();
+    if cwd.len() < size {
+        let dst = buf.get_as_mut_slice(size)?;
+        dst[..cwd.len()].copy_from_slice(cwd);
+        if dst[cwd.len()-1] == b'/' {
+            dst[cwd.len()-1] = b'\0'; // null-terminate if the last character is a slash
+        }
+        dst[cwd.len()] = 0;
+        Ok(cwd.len() as isize + 1)
+    } else {
+        Err(LinuxError::ERANGE)
+    }
 }
 
 #[syscall_trace]

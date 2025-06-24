@@ -1,13 +1,16 @@
+use crate::interface::mm::shm::sys_shmat;
 use crate::ptr::UserInPtr;
 use crate::{
     ptr::{PtrWrapper, UserPtr},
     syscall_instrument,
 };
+use alloc::string::ToString;
 use alloc::vec;
 use axerrno::{LinuxError, LinuxResult};
 use axhal::paging::MappingFlags;
 use macro_rules_attribute::apply;
-use memory_addr::{VirtAddr, VirtAddrRange};
+use memory_addr::{MemoryAddr, PAGE_SIZE_4K, VirtAddr, VirtAddrRange};
+use starry_core::shared_memory::{SHARED_MEMORY_MANAGER, SHARED_MEMORY_MAPPING};
 use starry_core::task::current_process_data;
 use syscall_trace::syscall_trace;
 
@@ -76,6 +79,19 @@ pub fn sys_mmap(
     fd: i32,
     offset: isize,
 ) -> LinuxResult<isize> {
+    use axalloc::global_allocator;
+    let allocator = global_allocator();
+    error!(
+        "memory statistic: used: [{} MiB, {} MiB in pages], available: [{} MiB, {} MiB in pages, {} MiB in total], {} MiB in total]",
+        allocator.used_bytes() / 1024 / 1024,
+        allocator.used_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024,
+        allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024 + allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024
+            + allocator.available_pages() / 256
+            + allocator.used_bytes() / 1024 / 1024,
+    );
     // Safety: addr is used for mapping, and we won't directly access it.
     let mut addr = unsafe { addr.get_unchecked() };
 
@@ -130,30 +146,89 @@ pub fn sys_mmap(
         !map_flags.contains(MmapFlags::MAP_ANONYMOUS)
     };
 
-    aspace.map_alloc(
-        start_addr,
-        aligned_length,
-        permission_flags.into(),
-        populate,
-    )?;
+    let writeable = permission_flags.contains(MmapProt::PROT_WRITE)
+        && map_flags.contains(MmapFlags::MAP_SHARED);
+    if writeable {
+        error!("we don't support PROT_WRITE for mmap with fd yet.");
+    }
+
+    if writeable && !populate {
+        let id = SHARED_MEMORY_MANAGER.next_available_key();
+        SHARED_MEMORY_MANAGER.create(id, length.align_up_4k())?;
+        drop(aspace);
+        sys_shmat(id as _, start_addr.as_usize() as _, 0)?;
+        return Ok(start_addr.as_usize() as _);
+    } else {
+        aspace.map_alloc(
+            start_addr,
+            aligned_length,
+            permission_flags.into(),
+            populate,
+        )?;
+    }
 
     if populate {
         let file = arceos_posix_api::get_file_like(fd)?;
         let file_size = file.stat()?.st_size as usize;
-        let file = file
+        let posix_file = file
             .into_any()
             .downcast::<arceos_posix_api::File>()
             .map_err(|_| LinuxError::EBADF)?;
-        let file = file.inner().lock();
+        let file = posix_file.inner().lock();
         if offset < 0 || offset as usize >= file_size {
             return Err(LinuxError::EINVAL);
         }
         let offset = offset as usize;
         let length = core::cmp::min(length, file_size - offset);
         let mut buf = vec![0u8; length];
-        file.read_at(offset as u64, &mut buf)?;
-        aspace.write(start_addr, &buf)?;
+
+        let file_path = posix_file.path();
+        if writeable && file_path.starts_with("/dev/shm") {
+            error!("mmap shm, path: {:?}", file_path);
+            let mut mapping = SHARED_MEMORY_MAPPING.lock();
+            if !mapping.contains_key(file_path) {
+                error!("mmap [shm get] at path: {:?}", file_path);
+                let id = SHARED_MEMORY_MANAGER.next_available_key();
+                mapping.insert(file_path.to_string(), id);
+                // shmat
+                error!("length = {:?}", length.align_up_4k());
+                let shared_memory = SHARED_MEMORY_MANAGER.create(id, length.align_up_4k())?;
+                error!("shared_memory: {:?}", shared_memory);
+                let buf = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        shared_memory.addr as *mut u8,
+                        shared_memory.page_count * PAGE_SIZE_4K,
+                    )
+                };
+                error!(
+                    "buf addr = {:x?} len = {:?}",
+                    buf.as_ptr() as usize,
+                    buf.len()
+                );
+                buf.fill(0);
+            }
+            let id = mapping.get(file_path).ok_or(LinuxError::EINVAL)?;
+            // shmget
+            error!("mmap [shm at] at path: {:?}", file_path);
+            aspace.unmap(start_addr, aligned_length)?;
+            drop(aspace);
+            sys_shmat(*id as _, start_addr.as_usize() as _, 0)?;
+        } else {
+            file.read_at(offset as u64, &mut buf)?;
+            aspace.write(start_addr, &buf)?;
+        }
     }
+    error!(
+        "memory statistic: used: [{} MiB, {} MiB in pages], available: [{} MiB, {} MiB in pages, {} MiB in total], {} MiB in total]",
+        allocator.used_bytes() / 1024 / 1024,
+        allocator.used_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024,
+        allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024 + allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024
+            + allocator.available_pages() / 256
+            + allocator.used_bytes() / 1024 / 1024,
+    );
     Ok(start_addr.as_usize() as _)
 }
 
@@ -173,6 +248,19 @@ pub fn sys_munmap(addr: UserPtr<usize>, length: usize) -> LinuxResult<isize> {
 
 #[syscall_trace]
 pub fn sys_mprotect(addr: UserInPtr<usize>, length: usize, prot: i32) -> LinuxResult<isize> {
+    use axalloc::global_allocator;
+    let allocator = global_allocator();
+    error!(
+        "memory statistic: used: [{} MiB, {} MiB in pages], available: [{} MiB, {} MiB in pages, {} MiB in total], {} MiB in total]",
+        allocator.used_bytes() / 1024 / 1024,
+        allocator.used_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024,
+        allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024 + allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024
+            + allocator.available_pages() / 256
+            + allocator.used_bytes() / 1024 / 1024,
+    );
     // Safety: addr is used for mapping, and we won't directly access it.
     let addr = unsafe { addr.get_unchecked() };
 
@@ -189,6 +277,16 @@ pub fn sys_mprotect(addr: UserInPtr<usize>, length: usize, prot: i32) -> LinuxRe
     let length = memory_addr::align_up_4k(length);
     let start_addr = VirtAddr::from(addr as usize);
     aspace.protect(start_addr, length, permission_flags.into())?;
-
+    error!(
+        "memory statistic: used: [{} MiB, {} MiB in pages], available: [{} MiB, {} MiB in pages, {} MiB in total], {} MiB in total]",
+        allocator.used_bytes() / 1024 / 1024,
+        allocator.used_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024,
+        allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024 + allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024
+            + allocator.available_pages() / 256
+            + allocator.used_bytes() / 1024 / 1024,
+    );
     Ok(0)
 }

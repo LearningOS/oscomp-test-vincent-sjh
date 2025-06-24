@@ -22,5 +22,5 @@ pub fn sys_getuid() -> LinuxResult<isize> {
 #[syscall_trace]
 pub fn sys_geteuid() -> LinuxResult<isize> {
     // TODO: Implement the actual syscall logic
-    Ok(1000)
+    Ok(0)
 }

@@ -2,9 +2,11 @@ use core::ffi::c_int;
 
 use arceos_posix_api as api;
 use arceos_posix_api::{FD_TABLE, add_file_like, close_file_like, ctypes, get_file_like};
+use arceos_posix_api::ctypes::O_CLOEXEC;
 use axerrno::{LinuxError, LinuxResult};
 use starry_core::resource::ResourceLimitType;
 use starry_core::task::current_process_data;
+use syscall_trace::syscall_trace;
 
 pub fn sys_dup(old_fd: c_int) -> LinuxResult<isize> {
     let limit = current_process_data()
@@ -23,10 +25,6 @@ pub fn sys_dup(old_fd: c_int) -> LinuxResult<isize> {
 
 pub fn sys_dup2(old_fd: c_int, new_fd: c_int) -> LinuxResult<isize> {
     debug!("sys_dup2 <= old_fd: {}, new_fd: {}", old_fd, new_fd);
-    if old_fd == new_fd {
-        let r = sys_fcntl(old_fd, ctypes::F_GETFD as _, 0)?;
-        return if r >= 0 { Ok(old_fd as _) } else { Ok(r) };
-    }
     let limit = current_process_data()
         .resource_limits
         .lock()
@@ -48,8 +46,15 @@ pub fn sys_dup2(old_fd: c_int, new_fd: c_int) -> LinuxResult<isize> {
     Ok(new_fd as _)
 }
 
-pub fn sys_dup3(old_fd: c_int, new_fd: c_int) -> LinuxResult<isize> {
-    debug!("sys_dup3 <= old_fd: {}, new_fd: {}", old_fd, new_fd);
+#[syscall_trace]
+pub fn sys_dup3(old_fd: c_int, new_fd: c_int, flags:c_int) -> LinuxResult<isize> {
+    debug!("sys_dup3 <= old_fd: {}, new_fd: {},flags:{}", old_fd, new_fd,flags);
+    if old_fd == new_fd {
+        return Err(LinuxError::EINVAL);
+    }
+    if flags != O_CLOEXEC as i32 && flags != 0 {
+        return Err(LinuxError::EINVAL);
+    }
     sys_dup2(old_fd, new_fd)
 }
 

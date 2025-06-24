@@ -90,7 +90,7 @@ impl ProcessData {
 
 impl Drop for ProcessData {
     fn drop(&mut self) {
-        trace!("process data drop: process={:?}", self.command_line.lock());
+        //error!("process data drop: process={:?}", self.command_line.lock());
         // TODO: prevent memory leak
         if !cfg!(target_arch = "aarch64") && !cfg!(target_arch = "loongarch64") {
             // See [`crate::new_user_aspace`]

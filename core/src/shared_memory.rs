@@ -1,4 +1,5 @@
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::sync::Arc;
 use axalloc::global_allocator;
 use axerrno::{LinuxError, LinuxResult};
@@ -6,6 +7,7 @@ use axsync::Mutex;
 use core::sync::atomic::{AtomicU32, Ordering};
 use memory_addr::PAGE_SIZE_4K;
 
+#[derive(Debug)]
 pub struct SharedMemory {
     /// The key of the shared memory segment
     pub key: u32,
@@ -27,7 +29,7 @@ impl Drop for SharedMemory {
 }
 
 pub struct SharedMemoryManager {
-    mem_map: Mutex<BTreeMap<u32, Arc<SharedMemory>>>,
+    pub mem_map: Mutex<BTreeMap<u32, Arc<SharedMemory>>>,
     next_key: AtomicU32,
 }
 
@@ -55,12 +57,15 @@ impl SharedMemoryManager {
         let vaddr = allocator
             .alloc_pages(page_count, PAGE_SIZE_4K)
             .map_err(|_| LinuxError::ENOMEM)?;
+        error!("shm create page count = {}", page_count);
         let shared_memory = SharedMemory {
             key,
             addr: vaddr,
-            page_count: size,
+            page_count,
         };
         let shared_memory = Arc::new(shared_memory);
+        debug!("[SharedMemory] create: addr: {:#x}, page_count: {}, key: {}",
+            shared_memory.addr, shared_memory.page_count, shared_memory.key);
         self.mem_map.lock().insert(key, shared_memory.clone());
         Ok(shared_memory)
     }
@@ -71,3 +76,5 @@ impl SharedMemoryManager {
 }
 
 pub static SHARED_MEMORY_MANAGER: SharedMemoryManager = SharedMemoryManager::new();
+
+pub static SHARED_MEMORY_MAPPING: Mutex<BTreeMap<String, u32>> = Mutex::new(BTreeMap::new());

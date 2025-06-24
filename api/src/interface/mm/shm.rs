@@ -27,9 +27,20 @@ const IPC_PRIVATE: c_int = 0;
 pub fn sys_shmget(key: c_int, size: c_ulong, shm_flag: c_int) -> LinuxResult<isize> {
     let size = size as usize;
     let flags = ShmFlags::from_bits_truncate(shm_flag);
+    //print the num of shared memory segments
+    //debug!("shared memory num: {}", SHARED_MEMORY_MANAGER.mem_map.lock().len());
+    //print all the shmid in the shared memory manager
+    //debug!("shared memory keys: {:?}", SHARED_MEMORY_MANAGER.mem_map.lock().keys());
     // TODO: permission check
     if key == IPC_PRIVATE {
         // IPC get private
+        // exam if the num of shared memory segments exceeds the limit
+        if SHARED_MEMORY_MANAGER.mem_map.lock().len() > 4096 {
+            return Err(LinuxError::ENOSPC);
+        }
+        if size == 0 {
+            return Err(LinuxError::EINVAL);
+        }
         let key = SHARED_MEMORY_MANAGER.next_available_key();
         let shared_memory = SHARED_MEMORY_MANAGER.create(key, size)?;
         Ok(shared_memory.key as _)
@@ -39,6 +50,12 @@ pub fn sys_shmget(key: c_int, size: c_ulong, shm_flag: c_int) -> LinuxResult<isi
             if !flags.contains(ShmFlags::IPC_CREAT) {
                 Err(LinuxError::ENOENT)
             } else {
+                if SHARED_MEMORY_MANAGER.mem_map.lock().len() > 4096 {
+                    return Err(LinuxError::ENOSPC);
+                }
+                if size == 0 {
+                    return Err(LinuxError::EINVAL);
+                }
                 let shared_memory = SHARED_MEMORY_MANAGER.create(key, size)?;
                 Ok(shared_memory.key as _)
             }
@@ -46,7 +63,12 @@ pub fn sys_shmget(key: c_int, size: c_ulong, shm_flag: c_int) -> LinuxResult<isi
             if flags.contains(ShmFlags::IPC_CREAT | ShmFlags::IPC_EXCL) {
                 Err(LinuxError::EEXIST)
             } else {
-                Ok(key as _)
+                debug!("length:{}", SHARED_MEMORY_MANAGER.get(key).unwrap().page_count);
+                if size > SHARED_MEMORY_MANAGER.get(key).unwrap().page_count * 4096 {
+                    Err(LinuxError::EINVAL)
+                }else{
+                    Ok(key as _)
+                }
             }
         }
     }

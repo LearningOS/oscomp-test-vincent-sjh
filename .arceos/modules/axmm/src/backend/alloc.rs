@@ -91,6 +91,7 @@ impl Backend {
             // Allocate a physical frame lazily and map it to the fault address.
             // `vaddr` does not need to be aligned. It will be automatically
             // aligned during `pt.map` regardless of the page size.
+            error!("handle alloc populate: vaddr: {:#x}, frame: {:#x}, flags: {:?}", vaddr, frame, orig_flags);
             pt.map(vaddr, frame, PageSize::Size4K, orig_flags)
                 .map(|tlb| tlb.flush())
                 .is_ok()

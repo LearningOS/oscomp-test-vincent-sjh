@@ -315,7 +315,7 @@ impl AddrSpace {
     /// aligned.
     pub fn protect(&mut self, start: VirtAddr, size: usize, flags: MappingFlags) -> AxResult {
         // Populate the area first, which also checks the address range for us.
-        self.populate_area(start, size)?;
+        // self.populate_area(start, size)?;
 
         self.areas
             .protect(start, size, |_| Some(flags), &mut self.pt)

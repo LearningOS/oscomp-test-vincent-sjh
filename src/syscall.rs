@@ -36,17 +36,18 @@ fn handle_syscall(tf: &mut TrapFrame, syscall_num: usize) -> isize {
             tf.arg4() as _,
             tf.arg5() as _,
         ),
-        Sysno::ioctl => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2().into()),
         Sysno::writev => sys_writev(tf.arg0() as _, tf.arg1().into(), tf.arg2() as _),
         Sysno::sched_yield => sys_sched_yield(),
         Sysno::nanosleep => sys_nanosleep(tf.arg0().into(), tf.arg1().into()),
         Sysno::getpid => sys_getpid(),
         Sysno::getppid => sys_getppid(),
+        Sysno::setpgid => sys_setpgid(tf.arg0() as _, tf.arg1() as _),
+        Sysno::getpgid => sys_getpgid(tf.arg0() as _),
         Sysno::exit => sys_exit(tf.arg0() as _),
-        Sysno::gettimeofday => sys_get_time_of_day(tf.arg0().into()),
+        Sysno::gettimeofday => sys_gettimeofday(tf.arg0().into(), tf.arg1().into()),
         Sysno::getcwd => sys_getcwd(tf.arg0().into(), tf.arg1() as _),
         Sysno::dup => sys_dup(tf.arg0() as _),
-        Sysno::dup3 => sys_dup3(tf.arg0() as _, tf.arg1() as _),
+        Sysno::dup3 => sys_dup3(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
         Sysno::fcntl => sys_fcntl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
         #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
         Sysno::clone => sys_clone(
@@ -302,9 +303,31 @@ fn handle_syscall(tf: &mut TrapFrame, syscall_num: usize) -> isize {
         Sysno::listen => sys_listen(tf.arg0() as _, tf.arg1() as _),
         Sysno::accept => sys_accept(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
         Sysno::connect => sys_connect(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
+        Sysno::sched_getaffinity => {
+            sys_sched_getaffinity(tf.arg0() as _, tf.arg1() as _, tf.arg2().into())
+        }
+        Sysno::sched_setaffinity => {
+            sys_sched_setaffinity(tf.arg0() as _, tf.arg1() as _, tf.arg2().into())
+        }
+        Sysno::fchmodat => sys_fchmodat(
+            tf.arg0() as _,
+            tf.arg1().into(),
+            tf.arg2() as _,
+            tf.arg3() as _,
+        ),
+        Sysno::faccessat => sys_faccessat(
+            tf.arg0() as _,
+            tf.arg1().into(),
+            tf.arg2() as _,
+        ),
+        Sysno::readlinkat => sys_readlinkat(
+            tf.arg0() as _,
+            tf.arg1().into(),
+            tf.arg2().into(),
+            tf.arg3() as _,
+        ),
         #[cfg(target_arch = "x86_64")]
         Sysno::access => stub_bypass(syscall_num),
-        Sysno::faccessat => stub_bypass(syscall_num),
         Sysno::sync => stub_bypass(syscall_num),
         Sysno::fsync => stub_bypass(syscall_num),
         Sysno::truncate => sys_truncate(tf.arg0().into(), tf.arg1() as _),
@@ -312,6 +335,15 @@ fn handle_syscall(tf: &mut TrapFrame, syscall_num: usize) -> isize {
         Sysno::syslog => stub_bypass(syscall_num),
         Sysno::get_robust_list => stub_bypass(syscall_num),
         Sysno::set_robust_list => stub_bypass(syscall_num),
+        Sysno::madvise => stub_bypass(syscall_num),
+        Sysno::ioctl => stub_bypass(syscall_num),
+        Sysno::setitimer => stub_bypass(syscall_num),
+        Sysno::fchownat => stub_bypass(syscall_num),
+        Sysno::symlinkat => stub_bypass(syscall_num),
+        Sysno::mknodat => stub_bypass(syscall_num),
+        Sysno::setuid => stub_bypass(syscall_num),
+        Sysno::setgroups => stub_bypass(syscall_num),
+        Sysno::setgid => stub_bypass(syscall_num),
         _ => stub_unimplemented(syscall_num),
     };
     let ans = result.unwrap_or_else(|err| -err.code() as _);

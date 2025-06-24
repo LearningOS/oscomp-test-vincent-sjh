@@ -17,11 +17,13 @@ pub fn sys_execve_impl(
     use axalloc::global_allocator;
     let allocator = global_allocator();
     error!(
-        "memory statistic: used: [{} KiB, {} pages], available: [{} KiB, {} pages]",
-        allocator.used_bytes() / 1024,
-        allocator.used_pages(),
-        allocator.available_bytes() / 1024,
-        allocator.available_pages()
+        "memory statistic: used: [{} MiB, {} MiB in pages], available: [{} MiB, {} MiB in pages, {} MiB in total], {} MiB in total]",
+        allocator.used_bytes() / 1024 / 1024 ,
+        allocator.used_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024,
+        allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024 + allocator.available_pages() / 256,
+        allocator.available_bytes() / 1024 / 1024 + allocator.available_pages() / 256 + allocator.used_bytes() / 1024 / 1024,
     );
     if current_process().get_threads().len() > 1 {
         // TODO: kill other threads except leader thread

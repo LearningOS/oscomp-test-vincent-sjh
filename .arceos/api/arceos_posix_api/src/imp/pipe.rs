@@ -210,7 +210,8 @@ pub fn sys_pipe(fds: &mut [c_int]) -> c_int {
 
         fds[0] = read_fd as c_int;
         fds[1] = write_fd as c_int;
-
+        debug!("read_fd: {}", read_fd as c_int);
+        debug!("write_fd: {}", write_fd as c_int);
         Ok(0)
     })
 }
